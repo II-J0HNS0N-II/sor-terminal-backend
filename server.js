@@ -26,6 +26,8 @@ const normalize = s => s.trim().toLowerCase();
 // ===============================
 // SCAN ENDPOINT
 // ===============================
+const puppeteer = require("puppeteer");
+
 app.get("/scan/:gt", async (req, res) => {
   const gt = req.params.gt.trim();
 
@@ -36,34 +38,35 @@ app.get("/scan/:gt", async (req, res) => {
 
   try {
     const url = `https://www.xbox.com/en-US/play/user/${encodeURIComponent(gt)}/friends`;
-    const response = await axios.get(url);
 
-    const $ = cheerio.load(response.data);
-
-    const friends = [];
-
-    // NEW SELECTOR — extracts actual gamertags
-    $("[data-test='friends-list'] a[href*='/user/']").each((i, el) => {
-      const name = $(el).text().trim();
-      if (name.length > 0) friends.push(name);
+    const browser = await puppeteer.launch({
+      headless: "new",
+      args: ["--no-sandbox", "--disable-setuid-sandbox"]
     });
 
-    // Fallback: scan for gamertag-like patterns
-    if (friends.length === 0) {
-      $("a").each((i, el) => {
-        const text = $(el).text().trim();
-        if (/^[A-Za-z0-9 ]{3,16}$/.test(text)) {
-          friends.push(text);
-        }
-      });
-    }
+    const page = await browser.newPage();
+    await page.goto(url, { waitUntil: "networkidle2" });
 
-    const hitsGeneral = friends.filter(f =>
-      generalKOS.some(k => normalize(k) === normalize(f))
+    // Wait for friend tiles to load
+    await page.waitForSelector("[data-test='friends-list']", { timeout: 10000 });
+
+    // Extract gamertags
+    const friends = await page.evaluate(() => {
+      const tiles = document.querySelectorAll("[data-test='friends-list'] a[href*='/user/']");
+      return Array.from(tiles).map(el => el.textContent.trim());
+    });
+
+    await browser.close();
+
+    // Normalize
+    const normalizedFriends = friends.map(f => normalize(f));
+
+    const hitsGeneral = normalizedFriends.filter(f =>
+      generalKOS.some(k => normalize(k) === f)
     );
 
-    const hitsDDOS = friends.filter(f =>
-      ddosers.some(d => normalize(d) === normalize(f))
+    const hitsDDOS = normalizedFriends.filter(f =>
+      ddosers.some(d => normalize(d) === f)
     );
 
     res.json({
@@ -79,7 +82,6 @@ app.get("/scan/:gt", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch or parse friends list." });
   }
 });
-
 
 // ===============================
 // START SERVER
