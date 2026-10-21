@@ -29,23 +29,34 @@ const normalize = s => s.trim().toLowerCase();
 app.get("/scan/:gt", async (req, res) => {
   const gt = req.params.gt.trim();
 
-  // Check GT itself
   const gtStatus = {
     isGeneralKOS: generalKOS.some(k => normalize(k) === normalize(gt)),
     isDDOS: ddosers.some(d => normalize(d) === normalize(gt))
   };
 
   try {
-    const url = `https://xbox.com/en-US/play/user/${encodeURIComponent(gt)}/friends`;
+    const url = `https://www.xbox.com/en-US/play/user/${encodeURIComponent(gt)}/friends`;
     const response = await axios.get(url);
 
     const $ = cheerio.load(response.data);
 
     const friends = [];
-    $("a").each((i, el) => {
-      const text = $(el).text().trim();
-      if (text.length > 0) friends.push(text);
+
+    // NEW SELECTOR — extracts actual gamertags
+    $("[data-test='friends-list'] a[href*='/user/']").each((i, el) => {
+      const name = $(el).text().trim();
+      if (name.length > 0) friends.push(name);
     });
+
+    // Fallback: scan for gamertag-like patterns
+    if (friends.length === 0) {
+      $("a").each((i, el) => {
+        const text = $(el).text().trim();
+        if (/^[A-Za-z0-9 ]{3,16}$/.test(text)) {
+          friends.push(text);
+        }
+      });
+    }
 
     const hitsGeneral = friends.filter(f =>
       generalKOS.some(k => normalize(k) === normalize(f))
@@ -68,6 +79,7 @@ app.get("/scan/:gt", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch or parse friends list." });
   }
 });
+
 
 // ===============================
 // START SERVER
